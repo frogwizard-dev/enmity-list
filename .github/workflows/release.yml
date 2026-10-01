@@ -1,0 +1,24 @@
+# Builds the add-on and publishes it whenever a version tag (v1.2.3) is pushed: a GitHub
+# release always, and CurseForge once the repository has a CF_API_KEY secret and the .toc has
+# an "## X-Curse-Project-ID:" line. Uses the BigWigs packager, which reads .pkgmeta.
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      CF_API_KEY: ${{ secrets.CF_API_KEY }}
+      GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: BigWigsMods/packager@v2

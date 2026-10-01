@@ -1,0 +1,14 @@
+## Interface: 16001, 120000, 120001, 120005, 120007, 120100
+## Title: EnmityList
+## Notes: An FFXIV-style aggro viewer: the enemies you're fighting, with threat and health.
+## Version: 0.2.2
+## OptionalDeps: EllesmereUI
+## SavedVariables: EnmityListDB
+## IconTexture: Interface\Icons\Ability_Warrior_Challange
+## AddonCompartmentFunc: EnmityList_OnCompartmentClick
+
+Options.lua
+Media.lua
+Gauge.lua
+ConfigKit.lua
+List.lua
