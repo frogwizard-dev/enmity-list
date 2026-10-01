@@ -21,7 +21,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      # Forever's own interface number (16001) reads as Classic; upload for the retail versions.
+      # Built and tested for WoW Forever only, so uploads are tagged with Forever's game version on
+      # CurseForge (1.60.1, its interface 16001), not the retail 12.x versions also in the .toc.
       - uses: BigWigsMods/packager@v2
         with:
-          args: -g retail
+          args: -g 1.60.1
