@@ -1,18 +1,22 @@
-local ADDON, ns = ...
-
--- Shared by all of these addons (each keeps its own copy; keep them identical).
--- An entry for the addon in the game's Options > AddOns list, so it can be found there: its
--- name, version and description, a button that opens its own settings window, and its slash
--- commands. Usage, from any file loaded after this one:
---   ns.AddOptionsPanel({
+-- FrogLib Options: an entry for an addon in the game's Options > AddOns list, under one shared
+-- "Frog Wizard" section: its name, version and description, a button that opens its own settings
+-- window, and its slash commands.
+--   FrogLib.Options.Add(ADDON, ns, {
 --       open = function() ... end,             -- opens the addon's settings
 --       button = "Open settings",              -- optional label for that button
 --       commands = { { "/xiv", "open the settings" } },
---   })
+--   })                                         -- sets ns.optionsCategory once registered
+-- The section itself is the global FrogwizardOptions, as before FrogLib, so addons with the old
+-- per-addon Options.lua still join the same one.
 
-local function Meta(field)
+local Options = FrogLib:Module("Options", 1)
+if not Options then return end
+
+local SECTION = "Frog Wizard"
+
+local function Meta(addon, field)
     local get = (C_AddOns and C_AddOns.GetAddOnMetadata) or GetAddOnMetadata
-    local value = get and get(ADDON, field)
+    local value = get and get(addon, field)
     return value and value ~= "" and value or nil
 end
 
@@ -33,18 +37,19 @@ local function CloseOptions()
         pcall(HideUIPanel, SettingsPanel)
     end
 end
+Options.CloseOptions = CloseOptions
 
-local function Build(opts)
-    local title = Meta("Title") or ADDON
+local function Build(addon, opts)
+    local title = Meta(addon, "Title") or addon
     local panel = CreateFrame("Frame")
     panel.name = title
 
     local heading = Text(panel, "GameFontNormalHuge", title)
     heading:SetPoint("TOPLEFT", 16, -16)
-    local version = Meta("Version")
+    local version = Meta(addon, "Version")
     local sub = Text(panel, "GameFontDisableSmall", version and ("Version " .. version) or "")
     sub:SetPoint("TOPLEFT", heading, "BOTTOMLEFT", 0, -4)
-    local notes = Text(panel, "GameFontHighlight", Meta("Notes") or "", 560)
+    local notes = Text(panel, "GameFontHighlight", Meta(addon, "Notes") or "", 560)
     notes:SetPoint("TOPLEFT", sub, "BOTTOMLEFT", 0, -14)
 
     local button = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
@@ -74,11 +79,8 @@ local function Build(opts)
     return panel, title
 end
 
--- All of these addons sit together under one "Frog Wizard" section of the list. Whichever loads
--- first makes it (FrogwizardOptions, shared): a page listing them, each with a button to its own
--- settings. Each addon's page goes under it.
-local SECTION = "Frog Wizard"
-
+-- The section: whichever addon gets here first makes it, a page listing them all, each with a
+-- button to its own settings. Each addon's page goes under it.
 local function Section()
     local s = _G.FrogwizardOptions
     if s then return s end
@@ -124,33 +126,30 @@ local function Section()
     return s
 end
 
-local pending
-local function Register()
-    if not pending or not (Settings and Settings.RegisterCanvasLayoutCategory) then return end
-    local panel, title = Build(pending)
+local function Register(addon, ns, opts)
+    if not (Settings and Settings.RegisterCanvasLayoutCategory) then return end
+    local panel, title = Build(addon, opts)
     local category
     if Settings.RegisterCanvasLayoutSubcategory then
         local s = Section()
         category = Settings.RegisterCanvasLayoutSubcategory(s.category, panel, title)
-        table.insert(s.entries, { title = title, open = pending.open })
+        table.insert(s.entries, { title = title, open = opts.open })
     else
         category = Settings.RegisterCanvasLayoutCategory(panel, title)
         Settings.RegisterAddOnCategory(category)
     end
-    ns.optionsCategory = category
-    pending = nil
+    if ns then ns.optionsCategory = category end
 end
 
-function ns.AddOptionsPanel(opts)
-    pending = opts
+function Options.Add(addon, ns, opts)
     if IsLoggedIn and IsLoggedIn() then
-        pcall(Register)
+        pcall(Register, addon, ns, opts)
     else
         local f = CreateFrame("Frame")
         f:RegisterEvent("PLAYER_LOGIN")
         f:SetScript("OnEvent", function(self)
             self:UnregisterAllEvents()
-            pcall(Register)
+            pcall(Register, addon, ns, opts)
         end)
     end
 end

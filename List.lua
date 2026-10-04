@@ -86,31 +86,8 @@ end
 
 -- Your threat on `unit` against the highest of everyone else on it (your pet, your party or
 -- raid and their pets): positive is your lead, negative how far behind you are. nil with nobody
--- else on it, or when the game hides the numbers.
-local function ThreatGap(unit)
-    local _, _, _, _, mine = UnitDetailedThreatSituation("player", unit)
-    if mine == nil or issecret(mine) then return nil end
-    local best
-    local function Consider(who)
-        if not UnitExists(who) or Safe(UnitIsUnit(who, "player")) ~= false then return end
-        local _, _, _, _, v = UnitDetailedThreatSituation(who, unit)
-        if v ~= nil and not issecret(v) and v > 0 and (not best or v > best) then best = v end
-    end
-    Consider("pet")
-    if IsInRaid() then
-        for i = 1, GetNumGroupMembers() do
-            Consider("raid" .. i)
-            Consider("raidpet" .. i)
-        end
-    else
-        for i = 1, 4 do
-            Consider("party" .. i)
-            Consider("partypet" .. i)
-        end
-    end
-    if not best then return nil end
-    return mine - best
-end
+-- else on it, or when the game hides the numbers. FrogLib's, shared with FrogPlates.
+local ThreatGap = FrogLib.Threat.Gap
 
 -- Writes the threat into `fs`: the gap (green ahead, red behind) or the %, which may be secret
 -- and so only ever goes to SetFormattedText.
@@ -517,7 +494,7 @@ end
 function EnmityList_OnCompartmentClick() ns.ToggleConfig() end
 
 -- Its entry in the game's Options > AddOns list (Options.lua).
-ns.AddOptionsPanel({
+FrogLib.Options.Add("EnmityList", ns, {
     open = function()
         if not (ns.window and ns.window:IsShown()) then ns.ToggleConfig() end
     end,
