@@ -6,6 +6,11 @@ local issecret = issecretvalue or function() return false end
 -- clicking: this client won't target a specific mob through its nameplate, and targeting by
 -- name picks the nearest one), so addon code can show, hide and restack them freely in combat.
 -- Enemies are listed in the order they joined, so rows don't jump about as threat shifts.
+--
+-- Threat is shown as a gap where there's someone to compare with: your lead over the next
+-- highest (party, raid or pets) while it's on you, or how far behind the one it's on you are.
+-- Alone, or where the game hides the numbers, it's your threat % instead. The same goes on
+-- each enemy's nameplate, beside its health bar, where the game lets addons add to it.
 
 local MAX_PLATES = 40
 
@@ -18,7 +23,10 @@ ns.defaults = {
     maxRows = 10,
     engagedOnly = true,    -- only enemies in combat, like FFXIV; off = every hostile nameplate
     onlyInCombat = false,  -- hide the whole list out of combat
-    showThreat = true,     -- threat % on the right
+    showThreat = true,     -- threat on the right: the gap (see above) or your %
+    showGap = true,        -- the gap where there's one; off = always the %
+    plates = true,         -- the same threat beside each engaged enemy's nameplate
+    plateSize = 11,
     showHealth = true,     -- thin health line under the name
     font = "Interface\\AddOns\\EnmityList\\Fonts\\SourceSans3.ttf",
     outline = "OUTLINE",
@@ -54,6 +62,71 @@ end
 
 local List = {}
 ns.List = List
+
+-- A unit's name as the game's own frames show it: on Forever that includes the surname
+-- (GetUnitName's second argument), where UnitName gives only the first name.
+local function FullName(unit)
+    if GetUnitName then
+        local ok, name = pcall(GetUnitName, unit, true)
+        if ok and name then return name end
+    end
+    return UnitName(unit)
+end
+
+------------------------------------------------------------------------------
+-- Threat gaps
+------------------------------------------------------------------------------
+
+local function Number(n)
+    local a = math.abs(n)
+    if a >= 1000000 then return string.format("%.1fm", n / 1000000) end
+    if a >= 1000 then return string.format("%.1fk", n / 1000) end
+    return tostring(math.floor(n + 0.5))
+end
+
+-- Your threat on `unit` against the highest of everyone else on it (your pet, your party or
+-- raid and their pets): positive is your lead, negative how far behind you are. nil with nobody
+-- else on it, or when the game hides the numbers.
+local function ThreatGap(unit)
+    local _, _, _, _, mine = UnitDetailedThreatSituation("player", unit)
+    if mine == nil or issecret(mine) then return nil end
+    local best
+    local function Consider(who)
+        if not UnitExists(who) or Safe(UnitIsUnit(who, "player")) ~= false then return end
+        local _, _, _, _, v = UnitDetailedThreatSituation(who, unit)
+        if v ~= nil and not issecret(v) and v > 0 and (not best or v > best) then best = v end
+    end
+    Consider("pet")
+    if IsInRaid() then
+        for i = 1, GetNumGroupMembers() do
+            Consider("raid" .. i)
+            Consider("raidpet" .. i)
+        end
+    else
+        for i = 1, 4 do
+            Consider("party" .. i)
+            Consider("partypet" .. i)
+        end
+    end
+    if not best then return nil end
+    return mine - best
+end
+
+-- Writes the threat into `fs`: the gap (green ahead, red behind) or the %, which may be secret
+-- and so only ever goes to SetFormattedText.
+local GAP_AHEAD, GAP_BEHIND, PLAIN = { 0.45, 0.95, 0.45 }, { 1.00, 0.40, 0.35 }, { 1, 1, 1 }
+local function SetThreatText(fs, v)
+    if ns.db.showGap and v.gap then
+        local c = v.gap >= 0 and GAP_AHEAD or GAP_BEHIND
+        fs:SetTextColor(c[1], c[2], c[3])
+        fs:SetText((v.gap >= 0 and "+" or "") .. Number(v.gap))
+    elseif issecret(v.percent) or v.percent ~= nil then
+        fs:SetTextColor(PLAIN[1], PLAIN[2], PLAIN[3])
+        pcall(fs.SetFormattedText, fs, "%d%%", v.percent)
+    else
+        fs:SetText("")
+    end
+end
 
 ------------------------------------------------------------------------------
 -- Rows
@@ -124,14 +197,7 @@ local function FillRow(r, v)
     r.name:SetText(v.name)
     local tc = v.situation and THREAT_COLORS[v.situation] or NO_THREAT
     r.dot:SetVertexColor(tc[1], tc[2], tc[3])
-    if ns.db.showThreat then
-        -- May be secret: never compared, only handed to SetFormattedText.
-        if issecret(v.percent) or v.percent ~= nil then
-            pcall(r.threat.SetFormattedText, r.threat, "%d%%", v.percent)
-        else
-            r.threat:SetText("")
-        end
-    end
+    if ns.db.showThreat then SetThreatText(r.threat, v) end
     r.health:SetValues(v.health, v.maxHealth, v.instant)
     local c = v.engaged and ENGAGED or PASSIVE
     r.health:SetColor(c[1], c[2], c[3])
@@ -142,6 +208,47 @@ local function FillRow(r, v)
         r.mark:Hide()
     end
     r.targeted:SetShown(v.targeted == true)
+end
+
+------------------------------------------------------------------------------
+-- Nameplates: a threat label beside each engaged enemy's health bar. Plates are re-used for
+-- other enemies, so the label belongs to the plate and is filled from whoever's on it.
+------------------------------------------------------------------------------
+
+local plateLabels = {} -- nameplate frame -> our label on it
+
+local function PlateLabel(unit)
+    local plate = C_NamePlate and C_NamePlate.GetNamePlateForUnit and C_NamePlate.GetNamePlateForUnit(unit)
+    -- Forbidden plates (in some instances) take nothing from addons.
+    if not plate or plate:IsForbidden() then return nil end
+    local label = plateLabels[plate]
+    if not label then
+        local uf = plate.UnitFrame
+        local bar = uf and (uf.healthBar or (uf.HealthBarsContainer and uf.HealthBarsContainer.healthBar))
+        local holder = CreateFrame("Frame", nil, plate)
+        holder:SetAllPoints(bar or plate)
+        holder:SetFrameLevel((bar or plate):GetFrameLevel() + 5)
+        label = holder:CreateFontString(nil, "OVERLAY")
+        label:SetPoint("LEFT", holder, "RIGHT", 4, 0)
+        label:SetShadowOffset(1, -1)
+        plateLabels[plate] = label
+    end
+    -- The font only when it's changed (this runs several times a second).
+    local font = ns.db.font .. ns.db.plateSize .. ns.db.outline
+    if label.font ~= font then
+        label.font = font
+        ns.Media:SetFont(label, ns.db.font, ns.db.plateSize, ns.db.outline)
+    end
+    return label
+end
+
+local function FrogPlatesShown()
+    local isLoaded = (C_AddOns and C_AddOns.IsAddOnLoaded) or IsAddOnLoaded
+    return isLoaded and isLoaded("FrogPlates")
+end
+
+local function HidePlateLabels()
+    for _, label in pairs(plateLabels) do label:Hide() end
 end
 
 ------------------------------------------------------------------------------
@@ -246,20 +353,33 @@ function List:Refresh(instant)
             if Eligible(unit) then units[#units + 1] = unit end
         end
         table.sort(units, function(a, b) return joined[a] < joined[b] end)
-        for i = 1, math.min(#units, db.maxRows) do
-            local unit = units[i]
+        HidePlateLabels()
+        for i, unit in ipairs(units) do
             local _, _, percent = UnitDetailedThreatSituation("player", unit)
-            entries[i] = {
-                name = UnitName(unit),
+            local v = {
+                name = FullName(unit),
                 situation = Safe(UnitThreatSituation("player", unit)),
                 percent = percent,
+                gap = ThreatGap(unit),
                 health = UnitHealth(unit), maxHealth = UnitHealthMax(unit),
                 engaged = Safe(UnitAffectingCombat(unit)),
                 mark = Safe(GetRaidTargetIndex(unit)),
                 targeted = Safe(UnitIsUnit(unit, "target")),
                 instant = instant,
             }
+            if i <= db.maxRows then entries[i] = v end
+            -- On its nameplate too, once you're on its threat list.
+            -- (FrogPlates shows the same on its own nameplates.)
+            if db.plates and v.situation ~= nil and not FrogPlatesShown() then
+                local label = PlateLabel(unit)
+                if label then
+                    SetThreatText(label, v)
+                    label:Show()
+                end
+            end
         end
+    else
+        HidePlateLabels()
     end
 
     for i, r in ipairs(self.rows) do
@@ -293,12 +413,18 @@ local function BuildLayout(p)
         function() return db.engagedOnly end, function(v) db.engagedOnly = v end), 28)
     place(UI.Checkbox(p, "Hide the list when you're out of combat",
         function() return db.onlyInCombat end, function(v) db.onlyInCombat = v end), 28)
-    place(UI.Checkbox(p, "Show threat %",
+    place(UI.Checkbox(p, "Show threat",
         function() return db.showThreat end, function(v) db.showThreat = v end), 28)
+    place(UI.Checkbox(p, "...as your lead (or how far behind) when others are on it",
+        function() return db.showGap end, function(v) db.showGap = v end), 28, 20)
+    place(UI.Checkbox(p, "Threat beside enemies' nameplates",
+        function() return db.plates end, function(v) db.plates = v end), 28)
     place(UI.Checkbox(p, "Show health line",
         function() return db.showHealth end, function(v) db.showHealth = v end), 36)
     place(UI.Help(p, "Enemies need a visible nameplate to be listed (V toggles enemy nameplates). "
-        .. "The list is display-only: clicks pass straight through it.", 400), 40, 4)
+        .. "The list is display-only: clicks pass straight through it. The lead is against the "
+        .. "highest of your group and pets; alone, or where the game hides the numbers, it's "
+        .. "your threat %.", 400), 54, 4)
 end
 
 local function BuildText(p)
@@ -309,11 +435,13 @@ local function BuildText(p)
     place(UI.Dropdown(p, "Font outline", UI.OUTLINES, function() return db.outline end,
         function(v) db.outline = v end), 30)
     place(UI.Stepper(p, "Text size", 8, 24, 1, function() return db.size end, function(v) db.size = v end), 26)
+    place(UI.Stepper(p, "Nameplate text size", 6, 20, 1, function() return db.plateSize end,
+        function(v) db.plateSize = v end), 26)
 end
 
 function ns.ToggleConfig()
     if not ns.window then
-        ns.window = UI.Window("EnmityListConfig", "EnmityList", 440, 470, {
+        ns.window = UI.Window("EnmityListConfig", "EnmityList", 440, 540, {
             { "layout", "Layout", BuildLayout },
             { "text", "Text", BuildText },
         })
@@ -346,8 +474,46 @@ loader:SetScript("OnEvent", function(_, event, arg1)
     end
 end)
 
+-- /enmity test, in combat with your target: what the game lets addons see, for threat gaps and
+-- nameplate threat. Prints, for the target: whether your threat numbers are secret (secret ones
+-- can be shown but not subtracted), the raw threat values of you and your group on it, and whether
+-- its nameplate frame is forbidden (forbidden ones can't have anything added to them).
+local function Test()
+    local unit = "target"
+    if not UnitExists(unit) then
+        print("|cffe08080EnmityList|r: target an enemy you're fighting first.")
+        return
+    end
+    local function Describe(v)
+        if v == nil then return "nil" end
+        if issecret(v) then return "secret" end
+        return tostring(v)
+    end
+    local _, status, percent, rawPercent, value = UnitDetailedThreatSituation("player", unit)
+    print(string.format("|cffe08080EnmityList|r: in combat: %s. You: status %s, %% %s, raw %% %s, threat %s.",
+        tostring(InCombatLockdown()), Describe(status), Describe(percent), Describe(rawPercent), Describe(value)))
+    for _, other in ipairs({ "pet", "party1", "party2", "party3", "party4" }) do
+        if UnitExists(other) then
+            local _, _, p, _, v = UnitDetailedThreatSituation(other, unit)
+            print(string.format("  %s: %% %s, threat %s", other, Describe(p), Describe(v)))
+        end
+    end
+    local plate = C_NamePlate and C_NamePlate.GetNamePlateForUnit and C_NamePlate.GetNamePlateForUnit(unit)
+    if plate then
+        print("  Its nameplate: " .. (plate:IsForbidden() and "forbidden" or "open to addons") .. ".")
+    else
+        print("  Its nameplate: none showing (V shows enemy nameplates).")
+    end
+end
+
 SLASH_ENMITYLIST1 = "/enmity"
-SlashCmdList.ENMITYLIST = ns.ToggleConfig
+SlashCmdList.ENMITYLIST = function(msg)
+    if strtrim(msg or ""):lower() == "test" then
+        Test()
+    else
+        ns.ToggleConfig()
+    end
+end
 function EnmityList_OnCompartmentClick() ns.ToggleConfig() end
 
 -- Its entry in the game's Options > AddOns list (Options.lua).

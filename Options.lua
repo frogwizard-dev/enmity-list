@@ -74,12 +74,69 @@ local function Build(opts)
     return panel, title
 end
 
+-- All of these addons sit together under one "Frog Wizard" section of the list. Whichever loads
+-- first makes it (FrogwizardOptions, shared): a page listing them, each with a button to its own
+-- settings. Each addon's page goes under it.
+local SECTION = "Frog Wizard"
+
+local function Section()
+    local s = _G.FrogwizardOptions
+    if s then return s end
+    local panel = CreateFrame("Frame")
+    panel.name = SECTION
+    local heading = Text(panel, "GameFontNormalHuge", SECTION)
+    heading:SetPoint("TOPLEFT", 16, -16)
+    local intro = Text(panel, "GameFontHighlight",
+        "Frog Wizard's addons. Each has its own page under this one, or open its settings here.", 560)
+    intro:SetPoint("TOPLEFT", heading, "BOTTOMLEFT", 0, -14)
+    s = { panel = panel, entries = {}, rows = {} }
+    -- One row per addon, laid out each time the page opens (addons join as they load).
+    panel:SetScript("OnShow", function()
+        table.sort(s.entries, function(a, b) return a.title < b.title end)
+        local last = intro
+        for i, e in ipairs(s.entries) do
+            local row = s.rows[i]
+            if not row then
+                row = CreateFrame("Frame", nil, panel)
+                row:SetSize(560, 28)
+                row.label = Text(row, "GameFontNormal", "")
+                row.label:SetPoint("LEFT", 0, 0)
+                row.button = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
+                row.button:SetSize(140, 22)
+                row.button:SetPoint("LEFT", 230, 0)
+                row.button:SetText("Open settings")
+                s.rows[i] = row
+            end
+            row.label:SetText(e.title)
+            row.button:SetScript("OnClick", function()
+                CloseOptions()
+                e.open()
+            end)
+            row:ClearAllPoints()
+            row:SetPoint("TOPLEFT", last, "BOTTOMLEFT", 0, i == 1 and -16 or -2)
+            row:Show()
+            last = row
+        end
+    end)
+    s.category = Settings.RegisterCanvasLayoutCategory(panel, SECTION)
+    Settings.RegisterAddOnCategory(s.category)
+    _G.FrogwizardOptions = s
+    return s
+end
+
 local pending
 local function Register()
     if not pending or not (Settings and Settings.RegisterCanvasLayoutCategory) then return end
     local panel, title = Build(pending)
-    local category = Settings.RegisterCanvasLayoutCategory(panel, title)
-    Settings.RegisterAddOnCategory(category)
+    local category
+    if Settings.RegisterCanvasLayoutSubcategory then
+        local s = Section()
+        category = Settings.RegisterCanvasLayoutSubcategory(s.category, panel, title)
+        table.insert(s.entries, { title = title, open = pending.open })
+    else
+        category = Settings.RegisterCanvasLayoutCategory(panel, title)
+        Settings.RegisterAddOnCategory(category)
+    end
     ns.optionsCategory = category
     pending = nil
 end
