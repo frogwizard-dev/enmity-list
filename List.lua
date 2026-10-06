@@ -34,16 +34,7 @@ ns.defaults = {
     size = 13,
 }
 
-local function CopyDefaults(src, dst)
-    for k, v in pairs(src) do
-        if type(v) == "table" then
-            if type(dst[k]) ~= "table" then dst[k] = {} end
-            CopyDefaults(v, dst[k])
-        elseif dst[k] == nil then
-            dst[k] = v
-        end
-    end
-end
+local CopyDefaults = FrogLib.Util.CopyDefaults
 
 -- FFXIV's enmity dot: green (low) -> yellow -> orange -> red (it's attacking you).
 local THREAT_COLORS = {
@@ -130,7 +121,7 @@ local function CreateRow(parent)
     r.threat:SetPoint("TOPRIGHT", -4, -3)
     r.threat:SetShadowOffset(1, -1)
 
-    r.health = ns.CreateGauge(r)
+    r.health = FrogLib.Gauge.New(r)
     r.health:SetHeight(3)
     r.health.bar:SetPoint("BOTTOMLEFT", r.mark, "BOTTOMRIGHT", 5, -4)
     r.health.bar:SetPoint("RIGHT", r, "RIGHT", -6, 0)
@@ -223,17 +214,8 @@ function List:Init()
     local f = CreateFrame("Frame", "EnmityListFrame", UIParent)
     f:SetClampedToScreen(true)
     f:SetMovable(true)
-    f:RegisterForDrag("LeftButton")
-    f:SetScript("OnDragStart", f.StartMoving)
-    f:SetScript("OnDragStop", function(frame)
-        frame:StopMovingOrSizing()
-        local p, _, rp, x, y = frame:GetPoint()
-        ns.db.point = { p, "UIParent", rp, x, y }
-    end)
-    f.unlockTint = f:CreateTexture(nil, "BACKGROUND", nil, -1)
-    f.unlockTint:SetPoint("TOPLEFT", -6, 6)
-    f.unlockTint:SetPoint("BOTTOMRIGHT", 6, -6)
-    f.unlockTint:SetColorTexture(0.3, 0.6, 1, 0.2)
+    -- Dragged while unlocked; the tint marks it (FrogLib's Mover.lua).
+    FrogLib.Mover.Make(f, { save = function(point) ns.db.point = point end, tint = 6, tintLevel = -1 })
     self.frame = f
 
     self.rows = {}

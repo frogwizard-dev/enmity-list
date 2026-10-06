@@ -1,5 +1,10 @@
 # EnmityList
 
+## 0.4.1
+
+- Settings: a dropdown shows the current choice afresh whenever its page opens, and shift-clicking + or - moves ten steps at once. The settings controls now come from FrogLib, shared with Frog Wizard's other add-ons.
+- Where you drag it is now kept only in its own settings, not also in the game's layout file, so the two can't disagree about where it goes.
+
 ## 0.4.0
 
 ### Threat lab
