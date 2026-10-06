@@ -200,45 +200,12 @@ end
 
 -- Text templates: "value / max" -> ("%d / %d", {value, max}). Words: value, max, percent
 -- (percent.1 for a decimal), plus any extra words the addon passes in `strings` (formatted %s).
--- Values may be secret, so they only ever reach SetFormattedText.
-local compiled = {}
+-- FrogLib.Text's, shared with Frog Wizard's other addons: any number of words, and a missing
+-- value blank. Values may be secret, so they only ever reach SetFormattedText.
 function UI.Compile(template, strings)
-    local key = template .. "\0" .. (strings and table.concat(strings, ",") or "")
-    local c = compiled[key]
-    if c then return c end
-    local isString = {}
-    for _, w in ipairs(strings or {}) do isString[w] = true end
-    local args = {}
-    local pattern = template:gsub("%%", "%%%%")
-    pattern = pattern:gsub("||", "|")
-    pattern = pattern:gsub("|", "||")
-    pattern = pattern:gsub("(%a+)(%.?%d*)", function(word, suffix)
-        local w = word:lower()
-        if isString[w] then
-            args[#args + 1] = w
-            return "%s" .. suffix
-        elseif w == "value" or w == "max" then
-            args[#args + 1] = w
-            return "%d" .. suffix
-        elseif w == "percent" then
-            args[#args + 1] = "percent"
-            local places = tonumber(suffix:match("^%.(%d)"))
-            if places then return "%." .. math.min(places, 3) .. "f%%" end
-            return "%d%%" .. suffix
-        end
-    end)
-    c = { pattern = pattern, args = args }
-    compiled[key] = c
-    return c
+    return FrogLib.Text.Compile(template, strings)
 end
 
 function UI.SetTemplateText(fs, template, vals, strings)
-    if not template or strtrim(template) == "" then
-        fs:Hide()
-        return
-    end
-    fs:Show()
-    local c = UI.Compile(template, strings)
-    local a = c.args
-    pcall(fs.SetFormattedText, fs, c.pattern, vals[a[1]], vals[a[2]], vals[a[3]], vals[a[4]], vals[a[5]], vals[a[6]])
+    FrogLib.Text.Set(fs, template, vals, strings)
 end

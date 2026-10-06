@@ -2,9 +2,10 @@
 ## Title: EnmityList
 ## Category: Frog Wizard
 ## Notes: An FFXIV-style aggro viewer: the enemies you're fighting, with threat and health.
-## Version: 0.3.1
+## Version: 0.4.0
 ## OptionalDeps: EllesmereUI
 ## SavedVariables: EnmityListDB
+## SavedVariablesPerCharacter: EnmityListLab
 ## IconTexture: Interface\Icons\Ability_Warrior_Challange
 ## AddonCompartmentFunc: EnmityList_OnCompartmentClick
 
@@ -13,3 +14,5 @@ Media.lua
 Gauge.lua
 ConfigKit.lua
 List.lua
+Lab.lua
+LabUI.lua

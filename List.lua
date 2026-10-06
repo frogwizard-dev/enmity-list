@@ -1,6 +1,7 @@
 local ADDON, ns = ...
 local UI = ns.UI
-local issecret = issecretvalue or function() return false end
+local issecret, Safe = FrogLib.issecret, FrogLib.Safe
+local Threat, Icons = FrogLib.Threat, FrogLib.Icons
 
 -- An aggro viewer in the style of FFXIV's enemy list. Rows are plain display frames (no
 -- clicking: this client won't target a specific mob through its nameplate, and targeting by
@@ -52,51 +53,28 @@ local THREAT_COLORS = {
     [3] = { 0.95, 0.25, 0.20 },
 }
 local NO_THREAT = { 0.55, 0.55, 0.55 }
-local ENGAGED = { 0.95, 0.42, 0.50 }
-local PASSIVE = { 0.96, 0.86, 0.56 }
-
-local function Safe(v)
-    if issecret(v) then return nil end
-    return v
-end
+-- The health line: FFXIV's engaged and not-yet-engaged colours (FrogLib.Color.XIV).
+local ENGAGED, PASSIVE = FrogLib.Color.XIV.engaged, FrogLib.Color.XIV.passive
 
 local List = {}
 ns.List = List
 
--- A unit's name as the game's own frames show it: on Forever that includes the surname
--- (GetUnitName's second argument), where UnitName gives only the first name.
-local function FullName(unit)
-    if GetUnitName then
-        local ok, name = pcall(GetUnitName, unit, true)
-        if ok and name then return name end
-    end
-    return UnitName(unit)
-end
-
 ------------------------------------------------------------------------------
 -- Threat gaps
 ------------------------------------------------------------------------------
-
-local function Number(n)
-    local a = math.abs(n)
-    if a >= 1000000 then return string.format("%.1fm", n / 1000000) end
-    if a >= 1000 then return string.format("%.1fk", n / 1000) end
-    return tostring(math.floor(n + 0.5))
-end
 
 -- Your threat on `unit` against the highest of everyone else on it (your pet, your party or
 -- raid and their pets): positive is your lead, negative how far behind you are. nil with nobody
 -- else on it, or when the game hides the numbers. FrogLib's, shared with FrogPlates.
 local ThreatGap = FrogLib.Threat.Gap
 
--- Writes the threat into `fs`: the gap (green ahead, red behind) or the %, which may be secret
--- and so only ever goes to SetFormattedText.
-local GAP_AHEAD, GAP_BEHIND, PLAIN = { 0.45, 0.95, 0.45 }, { 1.00, 0.40, 0.35 }, { 1, 1, 1 }
+-- Writes the threat into `fs`: the gap (green ahead, red behind; FrogLib's, as FrogPlates
+-- writes it) or the %, which may be secret and so only ever goes to SetFormattedText.
+local GAP_AHEAD, GAP_BEHIND = { r = 0.45, g = 0.95, b = 0.45 }, { r = 1.00, g = 0.40, b = 0.35 }
+local PLAIN = { 1, 1, 1 }
 local function SetThreatText(fs, v)
     if ns.db.showGap and v.gap then
-        local c = v.gap >= 0 and GAP_AHEAD or GAP_BEHIND
-        fs:SetTextColor(c[1], c[2], c[3])
-        fs:SetText((v.gap >= 0 and "+" or "") .. Number(v.gap))
+        Threat.SetGapText(fs, v.gap, GAP_AHEAD, GAP_BEHIND)
     elseif issecret(v.percent) or v.percent ~= nil then
         fs:SetTextColor(PLAIN[1], PLAIN[2], PLAIN[3])
         pcall(fs.SetFormattedText, fs, "%d%%", v.percent)
@@ -108,6 +86,8 @@ end
 ------------------------------------------------------------------------------
 -- Rows
 ------------------------------------------------------------------------------
+
+local MARK_SIZE = 14
 
 local function CreateRow(parent)
     local r = CreateFrame("Frame", nil, parent)
@@ -133,10 +113,12 @@ local function CreateRow(parent)
     r.dot:SetSize(12, 12)
     r.dot:SetPoint("LEFT", 4, 0)
 
-    r.mark = r:CreateTexture(nil, "ARTWORK")
-    r.mark:SetSize(14, 14)
+    -- The raid mark: an icon written into text (FrogLib.Icons), as which mark it is can be secret
+    -- in instances. Its size is fixed, so the name and health line keep their place without one.
+    r.mark = r:CreateFontString(nil, "ARTWORK")
+    r.mark:SetFont(STANDARD_TEXT_FONT, 12, "")
+    r.mark:SetSize(MARK_SIZE, MARK_SIZE)
     r.mark:SetPoint("LEFT", r.dot, "RIGHT", 4, 0)
-    r.mark:SetTexture("Interface\\TargetingFrame\\UI-RaidTargetingIcons")
 
     r.name = r:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     r.name:SetJustifyH("LEFT")
@@ -177,13 +159,9 @@ local function FillRow(r, v)
     if ns.db.showThreat then SetThreatText(r.threat, v) end
     r.health:SetValues(v.health, v.maxHealth, v.instant)
     local c = v.engaged and ENGAGED or PASSIVE
-    r.health:SetColor(c[1], c[2], c[3])
-    if v.mark then
-        SetRaidTargetIconTexture(r.mark, v.mark)
-        r.mark:Show()
-    else
-        r.mark:Hide()
-    end
+    r.health:SetColor(c.r, c.g, c.b)
+    -- The mark may be secret: never tested, only written (nothing shows for "no mark").
+    r.mark:SetShown(Icons.SetRaidMark(r.mark, v.mark, MARK_SIZE))
     r.targeted:SetShown(v.targeted == true)
 end
 
@@ -220,8 +198,7 @@ local function PlateLabel(unit)
 end
 
 local function FrogPlatesShown()
-    local isLoaded = (C_AddOns and C_AddOns.IsAddOnLoaded) or IsAddOnLoaded
-    return isLoaded and isLoaded("FrogPlates")
+    return FrogLib.Loaded("FrogPlates")
 end
 
 local function HidePlateLabels()
@@ -334,13 +311,13 @@ function List:Refresh(instant)
         for i, unit in ipairs(units) do
             local _, _, percent = UnitDetailedThreatSituation("player", unit)
             local v = {
-                name = FullName(unit),
+                name = FrogLib.Unit.Name(unit),
                 situation = Safe(UnitThreatSituation("player", unit)),
                 percent = percent,
                 gap = ThreatGap(unit),
                 health = UnitHealth(unit), maxHealth = UnitHealthMax(unit),
                 engaged = Safe(UnitAffectingCombat(unit)),
-                mark = Safe(GetRaidTargetIndex(unit)),
+                mark = GetRaidTargetIndex(unit), -- may be secret (FillRow)
                 targeted = Safe(UnitIsUnit(unit, "target")),
                 instant = instant,
             }
@@ -485,8 +462,12 @@ end
 
 SLASH_ENMITYLIST1 = "/enmity"
 SlashCmdList.ENMITYLIST = function(msg)
-    if strtrim(msg or ""):lower() == "test" then
+    local cmd, rest = strtrim(msg or ""):match("^(%S*)%s*(.-)$")
+    cmd = (cmd or ""):lower()
+    if cmd == "test" then
         Test()
+    elseif cmd == "lab" then
+        ns.LabUI.Command(rest) -- the threat lab (Lab.lua, LabUI.lua)
     else
         ns.ToggleConfig()
     end
@@ -498,5 +479,10 @@ FrogLib.Options.Add("EnmityList", ns, {
     open = function()
         if not (ns.window and ns.window:IsShown()) then ns.ToggleConfig() end
     end,
-    commands = { { "/enmity", "open or close the settings" } },
+    commands = {
+        { "/enmity", "open or close the settings" },
+        { "/enmity lab", "the threat lab: how much threat each of your abilities makes, measured as you fight" },
+        { "/enmity lab verbose", "a chat line for each clean threat lab measurement (on/off)" },
+        { "/enmity lab reset", "delete the threat lab's measurements for this character" },
+    },
 })

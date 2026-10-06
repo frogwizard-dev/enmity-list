@@ -6,3 +6,6 @@ darkroom.json
 Thumbs.db
 desktop.ini
 .DS_Store
+
+# FrogLib: added by the packager (.pkgmeta externals), and locally by _tools/sync_froglib.py
+Libs/FrogLib/
