@@ -3,17 +3,22 @@ local UI = ns.UI
 local issecret, Safe = FrogLib.issecret, FrogLib.Safe
 local Threat, Icons = FrogLib.Threat, FrogLib.Icons
 
--- An aggro viewer in the style of FFXIV's enemy list. Rows are plain display frames (no
--- clicking: this client won't target a specific mob through its nameplate, and targeting by
--- name picks the nearest one), so addon code can show, hide and restack them freely in combat.
--- Enemies are listed in the order they joined, so rows don't jump about as threat shifts.
---
--- Threat is shown as a gap where there's someone to compare with: your lead over the next
--- highest (party, raid or pets) while it's on you, or how far behind the one it's on you are.
--- Alone, or where the game hides the numbers, it's your threat % instead. The same goes on
--- each enemy's nameplate, beside its health bar, where the game lets addons add to it.
+-- An aggro viewer in the style of FFXIV's enemy list: display-only rows (this client won't target a
+-- given mob through its nameplate), free to restack in combat, in the order enemies joined. Threat is
+-- your lead over the next highest, or how far behind you are, where there's someone to compare with;
+-- otherwise your threat %. The same shows beside each enemy's nameplate.
 
 local MAX_PLATES = 40
+
+-- The bar textures and fonts the settings offer, and setting a font safely (FrogLib's Media),
+-- with this addon's own fonts listed first.
+local FONTS = "Interface\\AddOns\\" .. ADDON .. "\\Fonts\\"
+ns.Media = FrogLib.Media.New({
+    fonts = {
+        { "Michroma (wide)", FONTS .. "Michroma.ttf" }, -- wide, like FFXIV's gauge numbers
+        { "Source Sans 3 (Myriad-like)", FONTS .. "SourceSans3.ttf" },
+    },
+})
 
 ns.defaults = {
     locked = true,
@@ -34,8 +39,6 @@ ns.defaults = {
     size = 13,
 }
 
-local CopyDefaults = FrogLib.Util.CopyDefaults
-
 -- FFXIV's enmity dot: green (low) -> yellow -> orange -> red (it's attacking you).
 local THREAT_COLORS = {
     [0] = { 0.35, 0.85, 0.35 },
@@ -54,23 +57,22 @@ ns.List = List
 -- Threat gaps
 ------------------------------------------------------------------------------
 
--- Your threat on `unit` against the highest of everyone else on it (your pet, your party or
--- raid and their pets): positive is your lead, negative how far behind you are. nil with nobody
--- else on it, or when the game hides the numbers. FrogLib's, shared with FrogPlates.
+-- Your threat on `unit` against the highest of everyone else on it: your lead, or how far behind
+-- (negative); nil with nobody else on it or the numbers hidden. FrogLib's, shared with FrogPlates.
 local ThreatGap = FrogLib.Threat.Gap
 
--- Writes the threat into `fs`: the gap (green ahead, red behind; FrogLib's, as FrogPlates
+-- Writes the threat into `text`: the gap (green ahead, red behind; FrogLib's, as FrogPlates
 -- writes it) or the %, which may be secret and so only ever goes to SetFormattedText.
 local GAP_AHEAD, GAP_BEHIND = { r = 0.45, g = 0.95, b = 0.45 }, { r = 1.00, g = 0.40, b = 0.35 }
 local PLAIN = { 1, 1, 1 }
-local function SetThreatText(fs, v)
-    if ns.db.showGap and v.gap then
-        Threat.SetGapText(fs, v.gap, GAP_AHEAD, GAP_BEHIND)
-    elseif issecret(v.percent) or v.percent ~= nil then
-        fs:SetTextColor(PLAIN[1], PLAIN[2], PLAIN[3])
-        pcall(fs.SetFormattedText, fs, "%d%%", v.percent)
+local function SetThreatText(text, entry)
+    if ns.db.showGap and entry.gap then
+        Threat.SetGapText(text, entry.gap, GAP_AHEAD, GAP_BEHIND)
+    elseif issecret(entry.percent) or entry.percent ~= nil then
+        text:SetTextColor(PLAIN[1], PLAIN[2], PLAIN[3])
+        pcall(text.SetFormattedText, text, "%d%%", entry.percent)
     else
-        fs:SetText("")
+        text:SetText("")
     end
 end
 
@@ -81,79 +83,79 @@ end
 local MARK_SIZE = 14
 
 local function CreateRow(parent)
-    local r = CreateFrame("Frame", nil, parent)
-    r:EnableMouse(false) -- click-through: never blocks clicks on the world behind it
+    local row = CreateFrame("Frame", nil, parent)
+    row:EnableMouse(false) -- click-through: never blocks clicks on the world behind it
 
     -- A dark translucent band behind each row, as FFXIV's list has.
-    r.bg = r:CreateTexture(nil, "BACKGROUND")
-    r.bg:SetPoint("TOPLEFT", 0, -1)
-    r.bg:SetPoint("BOTTOMRIGHT", 0, 1)
-    r.bg:SetTexture("Interface\\Buttons\\WHITE8X8")
-    r.bg:SetGradient("HORIZONTAL", CreateColor(0, 0, 0, 0.55), CreateColor(0, 0, 0, 0))
+    row.bg = row:CreateTexture(nil, "BACKGROUND")
+    row.bg:SetPoint("TOPLEFT", 0, -1)
+    row.bg:SetPoint("BOTTOMRIGHT", 0, 1)
+    row.bg:SetTexture("Interface\\Buttons\\WHITE8X8")
+    row.bg:SetGradient("HORIZONTAL", CreateColor(0, 0, 0, 0.55), CreateColor(0, 0, 0, 0))
     -- Your current target: a light band.
-    r.targeted = r:CreateTexture(nil, "BACKGROUND", nil, 1)
-    r.targeted:SetAllPoints(r.bg)
-    r.targeted:SetTexture("Interface\\Buttons\\WHITE8X8")
-    r.targeted:SetGradient("HORIZONTAL", CreateColor(1, 0.95, 0.7, 0.28), CreateColor(1, 0.95, 0.7, 0))
-    r.targeted:Hide()
+    row.targeted = row:CreateTexture(nil, "BACKGROUND", nil, 1)
+    row.targeted:SetAllPoints(row.bg)
+    row.targeted:SetTexture("Interface\\Buttons\\WHITE8X8")
+    row.targeted:SetGradient("HORIZONTAL", CreateColor(1, 0.95, 0.7, 0.28), CreateColor(1, 0.95, 0.7, 0))
+    row.targeted:Hide()
 
-    r.dot = r:CreateTexture(nil, "ARTWORK")
-    if not r.dot:SetTexture("Interface\\CharacterFrame\\TempPortraitAlphaMask") then
-        r.dot:SetTexture("Interface\\Buttons\\WHITE8X8")
+    row.dot = row:CreateTexture(nil, "ARTWORK")
+    if not row.dot:SetTexture("Interface\\CharacterFrame\\TempPortraitAlphaMask") then
+        row.dot:SetTexture("Interface\\Buttons\\WHITE8X8")
     end
-    r.dot:SetSize(12, 12)
-    r.dot:SetPoint("LEFT", 4, 0)
+    row.dot:SetSize(12, 12)
+    row.dot:SetPoint("LEFT", 4, 0)
 
     -- The raid mark: an icon written into text (FrogLib.Icons), as which mark it is can be secret
     -- in instances. Its size is fixed, so the name and health line keep their place without one.
-    r.mark = r:CreateFontString(nil, "ARTWORK")
-    r.mark:SetFont(STANDARD_TEXT_FONT, 12, "")
-    r.mark:SetSize(MARK_SIZE, MARK_SIZE)
-    r.mark:SetPoint("LEFT", r.dot, "RIGHT", 4, 0)
+    row.mark = row:CreateFontString(nil, "ARTWORK")
+    row.mark:SetFont(STANDARD_TEXT_FONT, 12, "")
+    row.mark:SetSize(MARK_SIZE, MARK_SIZE)
+    row.mark:SetPoint("LEFT", row.dot, "RIGHT", 4, 0)
 
-    r.name = r:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    r.name:SetJustifyH("LEFT")
-    r.name:SetWordWrap(false)
-    r.name:SetShadowOffset(1, -1)
-    r.name:SetPoint("TOPLEFT", r.mark, "TOPRIGHT", 4, 2)
-    r.threat = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    r.threat:SetJustifyH("RIGHT")
-    r.threat:SetPoint("TOPRIGHT", -4, -3)
-    r.threat:SetShadowOffset(1, -1)
+    row.name = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    row.name:SetJustifyH("LEFT")
+    row.name:SetWordWrap(false)
+    row.name:SetShadowOffset(1, -1)
+    row.name:SetPoint("TOPLEFT", row.mark, "TOPRIGHT", 4, 2)
+    row.threat = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    row.threat:SetJustifyH("RIGHT")
+    row.threat:SetPoint("TOPRIGHT", -4, -3)
+    row.threat:SetShadowOffset(1, -1)
 
-    r.health = FrogLib.Gauge.New(r)
-    r.health:SetHeight(3)
-    r.health.bar:SetPoint("BOTTOMLEFT", r.mark, "BOTTOMRIGHT", 5, -4)
-    r.health.bar:SetPoint("RIGHT", r, "RIGHT", -6, 0)
-    r:Hide()
-    return r
+    row.health = FrogLib.Gauge.New(row)
+    row.health:SetHeight(3)
+    row.health.bar:SetPoint("BOTTOMLEFT", row.mark, "BOTTOMRIGHT", 5, -4)
+    row.health.bar:SetPoint("RIGHT", row, "RIGHT", -6, 0)
+    row:Hide()
+    return row
 end
 
-local function StyleRow(r)
+local function StyleRow(row)
     local db = ns.db
-    r:SetSize(db.width, db.rowHeight)
-    ns.Media:SetFont(r.name, db.font, db.size, db.outline)
-    ns.Media:SetFont(r.threat, db.font, math.max(8, db.size - 2), db.outline)
-    r.name:SetPoint("RIGHT", r, "RIGHT", db.showThreat and -40 or -4, 0)
-    r.threat:SetShown(db.showThreat)
-    r.health.bar:SetShown(db.showHealth)
+    row:SetSize(db.width, db.rowHeight)
+    ns.Media:SetFont(row.name, db.font, db.size, db.outline)
+    ns.Media:SetFont(row.threat, db.font, math.max(8, db.size - 2), db.outline)
+    row.name:SetPoint("RIGHT", row, "RIGHT", db.showThreat and -40 or -4, 0)
+    row.threat:SetShown(db.showThreat)
+    row.health.bar:SetShown(db.showHealth)
 end
 
--- vals: { name, threatSituation, threatPercent, health, maxHealth, engaged, mark, targeted }
-local function FillRow(r, v)
+-- entry: { name, situation, percent, gap, health, maxHealth, engaged, mark, targeted, instant }
+local function FillRow(row, entry)
     -- Cleared first: text set while a font file is still loading can render blank, and
     -- rewriting the same text doesn't redraw it.
-    r.name:SetText("")
-    r.name:SetText(v.name)
-    local tc = v.situation and THREAT_COLORS[v.situation] or NO_THREAT
-    r.dot:SetVertexColor(tc[1], tc[2], tc[3])
-    if ns.db.showThreat then SetThreatText(r.threat, v) end
-    r.health:SetValues(v.health, v.maxHealth, v.instant)
-    local c = v.engaged and ENGAGED or PASSIVE
-    r.health:SetColor(c.r, c.g, c.b)
+    row.name:SetText("")
+    row.name:SetText(entry.name)
+    local dotColor = entry.situation and THREAT_COLORS[entry.situation] or NO_THREAT
+    row.dot:SetVertexColor(dotColor[1], dotColor[2], dotColor[3])
+    if ns.db.showThreat then SetThreatText(row.threat, entry) end
+    row.health:SetValues(entry.health, entry.maxHealth, entry.instant)
+    local color = entry.engaged and ENGAGED or PASSIVE
+    row.health:SetColor(color.r, color.g, color.b)
     -- The mark may be secret: never tested, only written (nothing shows for "no mark").
-    r.mark:SetShown(Icons.SetRaidMark(r.mark, v.mark, MARK_SIZE))
-    r.targeted:SetShown(v.targeted == true)
+    row.mark:SetShown(Icons.SetRaidMark(row.mark, entry.mark, MARK_SIZE))
+    row.targeted:SetShown(entry.targeted == true)
 end
 
 ------------------------------------------------------------------------------
@@ -169,8 +171,9 @@ local function PlateLabel(unit)
     if not plate or plate:IsForbidden() then return nil end
     local label = plateLabels[plate]
     if not label then
-        local uf = plate.UnitFrame
-        local bar = uf and (uf.healthBar or (uf.HealthBarsContainer and uf.HealthBarsContainer.healthBar))
+        local unitFrame = plate.UnitFrame
+        local bar = unitFrame and (unitFrame.healthBar
+            or (unitFrame.HealthBarsContainer and unitFrame.HealthBarsContainer.healthBar))
         local holder = CreateFrame("Frame", nil, plate)
         holder:SetAllPoints(bar or plate)
         holder:SetFrameLevel((bar or plate):GetFrameLevel() + 5)
@@ -211,23 +214,23 @@ local function Eligible(unit)
 end
 
 function List:Init()
-    local f = CreateFrame("Frame", "EnmityListFrame", UIParent)
-    f:SetClampedToScreen(true)
-    f:SetMovable(true)
+    local frame = CreateFrame("Frame", "EnmityListFrame", UIParent)
+    frame:SetClampedToScreen(true)
+    frame:SetMovable(true)
     -- Dragged while unlocked; the tint marks it (FrogLib's Mover.lua).
-    FrogLib.Mover.Make(f, { save = function(point) ns.db.point = point end, tint = 6, tintLevel = -1 })
-    self.frame = f
+    FrogLib.Mover.Make(frame, { save = function(point) ns.db.point = point end, tint = 6, tintLevel = -1 })
+    self.frame = frame
 
     self.rows = {}
-    for i = 1, 20 do self.rows[i] = CreateRow(f) end
+    for i = 1, 20 do self.rows[i] = CreateRow(frame) end
 
-    local ev = CreateFrame("Frame")
+    local events = CreateFrame("Frame")
     for _, event in ipairs({ "NAME_PLATE_UNIT_ADDED", "NAME_PLATE_UNIT_REMOVED", "UNIT_HEALTH", "UNIT_MAXHEALTH",
         "UNIT_THREAT_LIST_UPDATE", "UNIT_THREAT_SITUATION_UPDATE", "UNIT_NAME_UPDATE", "UNIT_FLAGS",
         "PLAYER_TARGET_CHANGED", "RAID_TARGET_UPDATE", "PLAYER_REGEN_ENABLED", "PLAYER_REGEN_DISABLED" }) do
-        pcall(ev.RegisterEvent, ev, event)
+        pcall(events.RegisterEvent, events, event)
     end
-    ev:SetScript("OnEvent", function(_, event, unit)
+    events:SetScript("OnEvent", function(_, event, unit)
         if event == "NAME_PLATE_UNIT_ADDED" then
             joinCount = joinCount + 1
             joined[unit] = joinCount
@@ -237,11 +240,11 @@ function List:Init()
         self.dirty = true
     end)
     -- Coalesce everything into at most ~6 redraws a second; threat also drifts continuously.
-    local elapsed = 0
-    ev:SetScript("OnUpdate", function(_, dt)
-        elapsed = elapsed + dt
-        if elapsed > 0.15 and (self.dirty or elapsed > 0.5) then
-            elapsed = 0
+    local waited = 0
+    events:SetScript("OnUpdate", function(_, elapsed)
+        waited = waited + elapsed
+        if waited > 0.15 and (self.dirty or waited > 0.5) then
+            waited = 0
             self.dirty = false
             self:Refresh()
         end
@@ -260,14 +263,14 @@ end
 
 function List:Apply()
     local db = ns.db
-    local f = self.frame
-    f:SetScale(db.scale)
-    f:ClearAllPoints()
-    f:SetPoint(db.point[1], UIParent, db.point[3], db.point[4], db.point[5])
-    f:SetSize(db.width, db.rowHeight)
-    f:EnableMouse(not db.locked)
-    f.unlockTint:SetShown(not db.locked)
-    for _, r in ipairs(self.rows) do StyleRow(r) end
+    local frame = self.frame
+    frame:SetScale(db.scale)
+    frame:ClearAllPoints()
+    frame:SetPoint(db.point[1], UIParent, db.point[3], db.point[4], db.point[5])
+    frame:SetSize(db.width, db.rowHeight)
+    frame:EnableMouse(not db.locked)
+    frame.unlockTint:SetShown(not db.locked)
+    for _, row in ipairs(self.rows) do StyleRow(row) end
     self:Refresh(true)
 end
 
@@ -288,11 +291,11 @@ function List:Refresh(instant)
         for unit in pairs(joined) do
             if Eligible(unit) then units[#units + 1] = unit end
         end
-        table.sort(units, function(a, b) return joined[a] < joined[b] end)
+        table.sort(units, function(first, second) return joined[first] < joined[second] end)
         HidePlateLabels()
         for i, unit in ipairs(units) do
             local _, _, percent = UnitDetailedThreatSituation("player", unit)
-            local v = {
+            local entry = {
                 name = FrogLib.Unit.Name(unit),
                 situation = Safe(UnitThreatSituation("player", unit)),
                 percent = percent,
@@ -303,13 +306,12 @@ function List:Refresh(instant)
                 targeted = Safe(UnitIsUnit(unit, "target")),
                 instant = instant,
             }
-            if i <= db.maxRows then entries[i] = v end
-            -- On its nameplate too, once you're on its threat list.
-            -- (FrogPlates shows the same on its own nameplates.)
-            if db.plates and v.situation ~= nil and not FrogPlatesShown() then
+            if i <= db.maxRows then entries[i] = entry end
+            -- On its nameplate too, once you're on its threat list (FrogPlates shows the same on its own).
+            if db.plates and entry.situation ~= nil and not FrogPlatesShown() then
                 local label = PlateLabel(unit)
                 if label then
-                    SetThreatText(label, v)
+                    SetThreatText(label, entry)
                     label:Show()
                 end
             end
@@ -318,15 +320,15 @@ function List:Refresh(instant)
         HidePlateLabels()
     end
 
-    for i, r in ipairs(self.rows) do
-        local v = entries[i]
-        if v then
-            r:ClearAllPoints()
-            r:SetPoint("TOPLEFT", self.frame, "TOPLEFT", 0, -(i - 1) * db.rowHeight)
-            FillRow(r, v)
-            r:Show()
+    for i, row in ipairs(self.rows) do
+        local entry = entries[i]
+        if entry then
+            row:ClearAllPoints()
+            row:SetPoint("TOPLEFT", self.frame, "TOPLEFT", 0, -(i - 1) * db.rowHeight)
+            FillRow(row, entry)
+            row:Show()
         else
-            r:Hide()
+            row:Hide()
         end
     end
     self.frame:SetHeight(math.max(1, #entries) * db.rowHeight)
@@ -336,43 +338,34 @@ end
 -- Settings window
 ------------------------------------------------------------------------------
 
-local function BuildLayout(p)
+local function BuildLayout(page)
     local db = ns.db
     local place = UI.Placer()
-    place(UI.Checkbox(p, "Unlock to move (drag the list; shows a preview)",
-        function() return not db.locked end, function(v) db.locked = not v end), 34)
-    place(UI.Stepper(p, "Scale", 0.5, 2, 0.05, function() return db.scale end, function(v) db.scale = v end, "%.2f"), 26)
-    place(UI.Stepper(p, "Width", 120, 400, 10, function() return db.width end, function(v) db.width = v end), 26)
-    place(UI.Stepper(p, "Row height", 20, 48, 1, function() return db.rowHeight end, function(v) db.rowHeight = v end), 26)
-    place(UI.Stepper(p, "Most rows shown", 1, 20, 1, function() return db.maxRows end, function(v) db.maxRows = v end), 32)
-    place(UI.Checkbox(p, "Only enemies in combat (like FFXIV)",
-        function() return db.engagedOnly end, function(v) db.engagedOnly = v end), 28)
-    place(UI.Checkbox(p, "Hide the list when you're out of combat",
-        function() return db.onlyInCombat end, function(v) db.onlyInCombat = v end), 28)
-    place(UI.Checkbox(p, "Show threat",
-        function() return db.showThreat end, function(v) db.showThreat = v end), 28)
-    place(UI.Checkbox(p, "...as your lead (or how far behind) when others are on it",
-        function() return db.showGap end, function(v) db.showGap = v end), 28, 20)
-    place(UI.Checkbox(p, "Threat beside enemies' nameplates",
-        function() return db.plates end, function(v) db.plates = v end), 28)
-    place(UI.Checkbox(p, "Show health line",
-        function() return db.showHealth end, function(v) db.showHealth = v end), 36)
-    place(UI.Help(p, "Enemies need a visible nameplate to be listed (V toggles enemy nameplates). "
+    place(UI.Checkbox(page, "Unlock to move (drag the list; shows a preview)",
+        function() return not db.locked end, function(value) db.locked = not value end), 34)
+    place(UI.Stepper(page, "Scale", 0.5, 2, 0.05, db, "scale", "%.2f"), 26)
+    place(UI.Stepper(page, "Width", 120, 400, 10, db, "width"), 26)
+    place(UI.Stepper(page, "Row height", 20, 48, 1, db, "rowHeight"), 26)
+    place(UI.Stepper(page, "Most rows shown", 1, 20, 1, db, "maxRows"), 32)
+    place(UI.Checkbox(page, "Only enemies in combat (like FFXIV)", db, "engagedOnly"), 28)
+    place(UI.Checkbox(page, "Hide the list when you're out of combat", db, "onlyInCombat"), 28)
+    place(UI.Checkbox(page, "Show threat", db, "showThreat"), 28)
+    place(UI.Checkbox(page, "...as your lead (or how far behind) when others are on it", db, "showGap"), 28, 20)
+    place(UI.Checkbox(page, "Threat beside enemies' nameplates", db, "plates"), 28)
+    place(UI.Checkbox(page, "Show health line", db, "showHealth"), 36)
+    place(UI.Help(page, "Enemies need a visible nameplate to be listed (V toggles enemy nameplates). "
         .. "The list is display-only: clicks pass straight through it. The lead is against the "
         .. "highest of your group and pets; alone, or where the game hides the numbers, it's "
         .. "your threat %.", 400), 54, 4)
 end
 
-local function BuildText(p)
+local function BuildText(page)
     local db = ns.db
     local place = UI.Placer()
-    place(UI.Dropdown(p, "Font", function() return ns.Media:List("font") end,
-        function() return db.font end, function(v) db.font = v end), 30)
-    place(UI.Dropdown(p, "Font outline", UI.OUTLINES, function() return db.outline end,
-        function(v) db.outline = v end), 30)
-    place(UI.Stepper(p, "Text size", 8, 24, 1, function() return db.size end, function(v) db.size = v end), 26)
-    place(UI.Stepper(p, "Nameplate text size", 6, 20, 1, function() return db.plateSize end,
-        function(v) db.plateSize = v end), 26)
+    place(UI.Dropdown(page, "Font", function() return ns.Media:List("font") end, db, "font"), 30)
+    place(UI.Dropdown(page, "Font outline", UI.OUTLINES, db, "outline"), 30)
+    place(UI.Stepper(page, "Text size", 8, 24, 1, db, "size"), 26)
+    place(UI.Stepper(page, "Nameplate text size", 6, 20, 1, db, "plateSize"), 26)
 end
 
 function ns.ToggleConfig()
@@ -399,39 +392,37 @@ end
 local loader = CreateFrame("Frame")
 loader:RegisterEvent("ADDON_LOADED")
 loader:RegisterEvent("PLAYER_LOGIN")
-loader:SetScript("OnEvent", function(_, event, arg1)
-    if event == "ADDON_LOADED" and arg1 == ADDON then
+loader:SetScript("OnEvent", function(_, event, addonName)
+    if event == "ADDON_LOADED" and addonName == ADDON then
         EnmityListDB = EnmityListDB or {}
         EnmityListDB.driverMode = nil -- leftover from the clickable version
-        CopyDefaults(ns.defaults, EnmityListDB)
+        FrogLib.Util.CopyDefaults(ns.defaults, EnmityListDB)
         ns.db = EnmityListDB
     elseif event == "PLAYER_LOGIN" then
         List:Init()
     end
 end)
 
--- /enmity test, in combat with your target: what the game lets addons see, for threat gaps and
--- nameplate threat. Prints, for the target: whether your threat numbers are secret (secret ones
--- can be shown but not subtracted), the raw threat values of you and your group on it, and whether
--- its nameplate frame is forbidden (forbidden ones can't have anything added to them).
+-- /enmity test, in combat with your target: what the game lets addons see of its threat (secret or
+-- not, yours and your group's) and if its nameplate is forbidden (nothing can be added to those).
 local function Test()
     local unit = "target"
     if not UnitExists(unit) then
         print("|cffe08080EnmityList|r: target an enemy you're fighting first.")
         return
     end
-    local function Describe(v)
-        if v == nil then return "nil" end
-        if issecret(v) then return "secret" end
-        return tostring(v)
+    local function Describe(value)
+        if value == nil then return "nil" end
+        if issecret(value) then return "secret" end
+        return tostring(value)
     end
     local _, status, percent, rawPercent, value = UnitDetailedThreatSituation("player", unit)
     print(string.format("|cffe08080EnmityList|r: in combat: %s. You: status %s, %% %s, raw %% %s, threat %s.",
         tostring(InCombatLockdown()), Describe(status), Describe(percent), Describe(rawPercent), Describe(value)))
     for _, other in ipairs({ "pet", "party1", "party2", "party3", "party4" }) do
         if UnitExists(other) then
-            local _, _, p, _, v = UnitDetailedThreatSituation(other, unit)
-            print(string.format("  %s: %% %s, threat %s", other, Describe(p), Describe(v)))
+            local _, _, theirPercent, _, theirValue = UnitDetailedThreatSituation(other, unit)
+            print(string.format("  %s: %% %s, threat %s", other, Describe(theirPercent), Describe(theirValue)))
         end
     end
     local plate = C_NamePlate and C_NamePlate.GetNamePlateForUnit and C_NamePlate.GetNamePlateForUnit(unit)
@@ -443,12 +434,12 @@ local function Test()
 end
 
 SLASH_ENMITYLIST1 = "/enmity"
-SlashCmdList.ENMITYLIST = function(msg)
-    local cmd, rest = strtrim(msg or ""):match("^(%S*)%s*(.-)$")
-    cmd = (cmd or ""):lower()
-    if cmd == "test" then
+SlashCmdList.ENMITYLIST = function(input)
+    local command, rest = strtrim(input or ""):match("^(%S*)%s*(.-)$")
+    command = (command or ""):lower()
+    if command == "test" then
         Test()
-    elseif cmd == "lab" then
+    elseif command == "lab" then
         ns.LabUI.Command(rest) -- the threat lab (Lab.lua, LabUI.lua)
     else
         ns.ToggleConfig()

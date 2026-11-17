@@ -1,5 +1,12 @@
 # EnmityList
 
+## 0.4.2
+
+- A Forever update hides from add-ons how hard each hit lands, in the open world too, not only in dungeons. The threat lab's fit can't use a stretch of fighting with a landed hit in it any more, so it now learns only from misses and actions that deal no damage (Sunder Armor, shouts, dodged or parried swings), and fills slowly. Threat that grows with damage can't be measured while the game hides it.
+- The lab says so: those stretches are left out as "hit size hidden" (not "hidden by the game", which is for a cast or hit the game hid altogether), and the window explains what the fit can still learn. If the game shows hit sizes again, the lab uses them again by itself.
+- Clean samples still measure each ability's whole threat per use (one that's fully blocked still counts as blocked); only the part from its damage can't be split off.
+- Two of your hits on one enemy at the same moment are no longer taken for one, which could hand a clean sample the threat of a proc that landed with it.
+
 ## 0.4.1
 
 - Settings: a dropdown shows the current choice afresh whenever its page opens, and shift-clicking + or - moves ten steps at once. The settings controls now come from FrogLib, shared with Frog Wizard's other add-ons.
@@ -8,8 +15,8 @@
 ## 0.4.0
 
 ### Threat lab
-- New: `/enmity lab` measures how much threat each of your abilities really makes, from the changes in your threat as you fight. Built for tanks (Sunder Armor, Revenge, Shield Slam, Heroic Strike, Thunder Clap and the rest), it works for any ability.
-- Just play normally, auto-attack and all. The lab works it out from all your fighting together: how much threat each point of your damage makes (shown as "damage x 1.30" or so, your stance's multiplier, more with Defiance) and each ability's bonus threat on top. For every ability you see its bonus, the threat from its damage, the total per use, per rage and per second of global cooldown, and how sure the number is (± and how many fights it's from). Your plain swings should come out with no bonus, which is a good check.
+- New: `/enmity lab` measures how much threat each of your abilities makes, from the changes in your threat as you fight. Built for tanks (Sunder Armor, Revenge, Shield Slam, Heroic Strike, Thunder Clap and the rest), it works for any ability.
+- Play normally, auto-attack and all. The lab works it out from all your fighting together: how much threat each point of your damage makes (shown as "damage x 1.30" or so, your stance's multiplier, more with Defiance) and each ability's bonus threat on top. For every ability you see its bonus, the threat from its damage, the total per use, per rage and per second of global cooldown, and how sure the number is (± and how many fights it's from). Your plain swings should come out with no bonus, which is a good check.
 - A second method, "Clean samples", measures an ability exactly when it happens to be alone between two threat updates. That's rare once you're swinging, so it fills more slowly; switch between the two at the top of the window.
 - Click an ability for its breakdown: the solved numbers, its misses, and its clean measurements by rank, your level, the enemy's level and the outcome.
 - Filters: stance (Defensive Stance to start with), your level range, and hits only, misses only or everything. Taunt, Mocking Blow and Challenging Shout are left out of the averages ("sets threat").
