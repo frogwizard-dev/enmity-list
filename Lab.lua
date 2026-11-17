@@ -490,9 +490,9 @@ function Lab:Read(unit, now)
     if not Safe(UnitCanAttack("player", unit)) then return end
     local isTanking, status, _, _, raw = UnitDetailedThreatSituation("player", unit)
     if issecret(raw) or issecret(status) or issecret(isTanking) then
-        -- Hidden by the game here: nothing to measure.
+        -- Hidden by the game here: nothing to measure. What's kept for the mob stays (the same mob through another
+        -- token, your target, may read plainly: threat is secret through nameplate tokens).
         self.hiddenAt = now
-        self.mobs[guid] = nil
         return
     end
     self.readAt = now
@@ -1103,11 +1103,16 @@ local function Trim(self, now)
     end
 end
 
+-- Your target, then each other mob with a plate: your target's own plate is skipped (the same mob, whose threat reads
+-- as secret through its plate but plainly as your target).
 function Lab:Units()
     local units = { "target" }
+    local targetPlate = C_NamePlate.GetNamePlateForUnit("target")
     for i = 1, 40 do
         local unit = "nameplate" .. i
-        if Safe(UnitExists(unit)) then units[#units + 1] = unit end
+        if Safe(UnitExists(unit)) and (not targetPlate or C_NamePlate.GetNamePlateForUnit(unit) ~= targetPlate) then
+            units[#units + 1] = unit
+        end
     end
     return units
 end
@@ -1120,17 +1125,26 @@ function Lab:Tick()
     if inCombat or next(self.mobs) then
         for _, unit in ipairs(self:Units()) do self:Read(unit, now) end
     end
-    -- Changes whose outcome has had time to arrive.
-    local still = {}
-    for _, window in ipairs(self.pending) do
-        if window.evalAt <= now then self:Evaluate(window) else still[#still + 1] = window end
+    -- Changes whose outcome has had time to arrive (the rest kept in place, no new list each tick).
+    local pending, kept = self.pending, 0
+    for i = 1, #pending do
+        local window = pending[i]
+        if window.evalAt <= now then
+            self:Evaluate(window)
+        else
+            kept = kept + 1
+            pending[kept] = window
+        end
     end
-    self.pending = still
+    for i = #pending, kept + 1, -1 do pending[i] = nil end
     for guid, mob in pairs(self.mobs) do
         self:QuietClose(guid, mob, now - TUNING.GRACE)
         if now - mob.seen > TUNING.FORGET then self.mobs[guid] = nil end
     end
     Trim(self, now)
+    -- Nothing left to look at (out of combat, no enemy, nothing waiting, the log run out): the ticks stop till an
+    -- event of the lab's comes (OnEvent starts them again).
+    if not inCombat and not next(self.mobs) and #pending == 0 and #self.log == 0 then self.frame:Hide() end
 end
 
 function Lab:Flush()
@@ -1284,7 +1298,11 @@ function Lab:Init()
     if CombatLogGetCurrentEventInfo then
         self.readsCombatLog = pcall(frame.RegisterEvent, frame, "COMBAT_LOG_EVENT_UNFILTERED") and true or nil
     end
-    frame:SetScript("OnEvent", function(_, event, ...) self:OnEvent(event, ...) end)
+    pcall(frame.RegisterEvent, frame, "PLAYER_REGEN_DISABLED")
+    frame:SetScript("OnEvent", function(_, event, ...)
+        frame:Show() -- (the ticks, stopped while there was nothing to look at)
+        self:OnEvent(event, ...)
+    end)
     local waited = 0
     frame:SetScript("OnUpdate", function(_, elapsed)
         waited = waited + elapsed

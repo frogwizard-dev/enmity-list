@@ -2,7 +2,7 @@
 ## Title: EnmityList
 ## Category: Frog Wizard
 ## Notes: An FFXIV-style aggro viewer: the enemies you're fighting, with threat and health.
-## Version: 0.4.2
+## Version: 0.4.3
 ## OptionalDeps: EllesmereUI
 ## SavedVariables: EnmityListDB
 ## SavedVariablesPerCharacter: EnmityListLab

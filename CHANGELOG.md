@@ -1,5 +1,14 @@
 # EnmityList
 
+## 0.4.3
+
+- Your target's threat reads in numbers again (it's read as your target, not through its plate), and the lab keeps its baseline on your target rather than dropping it.
+- No second threat text on XIVPlates' plates (it shows its own, as FrogPlates does), but EnmityList's own comes back while they're loaded with their plate style or their threat text off.
+- Less work: only mobs with a plate are listened to, nothing runs while the list is empty, and each refresh reuses its tables. Rows that come back after a setting change keep their threat and health moving.
+- The threat lab stops ticking when there's nothing to measure (out of combat, no enemy, nothing waiting), for every class; it made a new table ten times a second.
+- Names in Russian, Korean or Chinese draw in every font.
+- Shared code (FrogLib 1.12.0): see its notes for the rest of what's fixed.
+
 ## 0.4.2
 
 - A Forever update hides from add-ons how hard each hit lands, in the open world too, not only in dungeons. The threat lab's fit can't use a stretch of fighting with a landed hit in it any more, so it now learns only from misses and actions that deal no damage (Sunder Armor, shouts, dodged or parried swings), and fills slowly. Threat that grows with damage can't be measured while the game hides it.

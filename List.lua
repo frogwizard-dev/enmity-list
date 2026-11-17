@@ -134,7 +134,7 @@ end
 local function StyleRow(row)
     local db = ns.db
     row:SetSize(db.width, db.rowHeight)
-    ns.Media:SetFont(row.name, db.font, db.size, db.outline)
+    ns.Media:SetNameFont(row.name, db.font, db.size, db.outline) -- names in other scripts draw too
     ns.Media:SetFont(row.threat, db.font, math.max(8, db.size - 2), db.outline)
     row.name:SetPoint("RIGHT", row, "RIGHT", db.showThreat and -40 or -4, 0)
     row.threat:SetShown(db.showThreat)
@@ -191,8 +191,15 @@ local function PlateLabel(unit)
     return label
 end
 
+-- FrogPlates and XIVPlates show the same threat text on their plates themselves, while they restyle them with their
+-- threat text on (skin.threatText; one loaded with its plates or its text turned off leaves them to us).
 local function FrogPlatesShown()
-    return FrogLib.Loaded("FrogPlates")
+    local plates = FrogLib.Plates
+    local skin = plates and plates.state and plates.state.skin
+    local ask = skin and (skin.threatText or skin.enabled)
+    if not ask then return false end
+    local ok, on = pcall(ask)
+    return ok and on and true or false
 end
 
 local function HidePlateLabels()
@@ -230,25 +237,33 @@ function List:Init()
         "PLAYER_TARGET_CHANGED", "RAID_TARGET_UPDATE", "PLAYER_REGEN_ENABLED", "PLAYER_REGEN_DISABLED" }) do
         pcall(events.RegisterEvent, events, event)
     end
-    events:SetScript("OnEvent", function(_, event, unit)
+    -- A unit event only counts for a mob with a plate (the list is made from them); party, raid and pet units' health
+    -- and the like are skipped.
+    events:SetScript("OnEvent", function(frame, event, unit)
         if event == "NAME_PLATE_UNIT_ADDED" then
             joinCount = joinCount + 1
             joined[unit] = joinCount
         elseif event == "NAME_PLATE_UNIT_REMOVED" then
             joined[unit] = nil
+        elseif type(unit) == "string" and event:find("^UNIT_") and not joined[unit] then
+            return
         end
         self.dirty = true
+        frame:Show() -- the redraw runs again
     end)
-    -- Coalesce everything into at most ~6 redraws a second; threat also drifts continuously.
+    -- Coalesce everything into at most ~6 redraws a second; threat also drifts continuously, so while rows show it's
+    -- looked at twice a second too. Nothing runs while there are none (the frame hides; its events go on).
     local waited = 0
-    events:SetScript("OnUpdate", function(_, elapsed)
+    events:SetScript("OnUpdate", function(frame, elapsed)
         waited = waited + elapsed
         if waited > 0.15 and (self.dirty or waited > 0.5) then
             waited = 0
             self.dirty = false
             self:Refresh()
+            if self.shownRows == 0 and not self.dirty then frame:Hide() end
         end
     end)
+    self.events = events
 
     -- Nameplates already on screen at login/reload.
     for i = 1, MAX_PLATES do
@@ -280,32 +295,39 @@ local SAMPLE = {
     { name = "Anemos Harpeia", situation = 0, percent = 12, health = 0.30, maxHealth = 1, engaged = true },
 }
 
+-- The lists a refresh fills, kept and reused (it runs several times a second in a fight).
+local liveEntries, units, entryPool = {}, {}, {}
+local function ByJoined(first, second) return joined[first] < joined[second] end
+
 function List:Refresh(instant)
     local db = ns.db
-    local entries = {}
+    local entries = wipe(liveEntries)
     if not db.locked then
         -- Unlocked: sample rows to position and style against.
         entries = SAMPLE
     elseif not db.onlyInCombat or InCombatLockdown() then
-        local units = {}
+        wipe(units)
         for unit in pairs(joined) do
             if Eligible(unit) then units[#units + 1] = unit end
         end
-        table.sort(units, function(first, second) return joined[first] < joined[second] end)
+        table.sort(units, ByJoined)
         HidePlateLabels()
+        local targetPlate = C_NamePlate.GetNamePlateForUnit("target")
         for i, unit in ipairs(units) do
-            local _, _, percent = UnitDetailedThreatSituation("player", unit)
-            local entry = {
-                name = FrogLib.Unit.Name(unit),
-                situation = Safe(UnitThreatSituation("player", unit)),
-                percent = percent,
-                gap = ThreatGap(unit),
-                health = UnitHealth(unit), maxHealth = UnitHealthMax(unit),
-                engaged = Safe(UnitAffectingCombat(unit)),
-                mark = GetRaidTargetIndex(unit), -- may be secret (FillRow)
-                targeted = Safe(UnitIsUnit(unit, "target")),
-                instant = instant,
-            }
+            -- Threat reads as secret through a plate's token, plainly through "target": your target's read that way.
+            local _, _, percent = UnitDetailedThreatSituation("player", FrogLib.Threat.Readable(unit))
+            local entry = entryPool[i] or {}
+            entryPool[i] = entry
+            entry.name = FrogLib.Unit.Name(unit)
+            entry.situation = Safe(UnitThreatSituation("player", unit))
+            entry.percent = percent
+            entry.gap = ThreatGap(unit)
+            entry.health, entry.maxHealth = UnitHealth(unit), UnitHealthMax(unit)
+            entry.engaged = Safe(UnitAffectingCombat(unit))
+            entry.mark = GetRaidTargetIndex(unit) -- may be secret (FillRow)
+            -- (The plate frames compared: whether two units are the same can be secret.)
+            entry.targeted = targetPlate ~= nil and C_NamePlate.GetNamePlateForUnit(unit) == targetPlate
+            entry.instant = instant
             if i <= db.maxRows then entries[i] = entry end
             -- On its nameplate too, once you're on its threat list (FrogPlates shows the same on its own).
             if db.plates and entry.situation ~= nil and not FrogPlatesShown() then
@@ -331,7 +353,10 @@ function List:Refresh(instant)
             row:Hide()
         end
     end
+    self.shownRows = #entries
     self.frame:SetHeight(math.max(1, #entries) * db.rowHeight)
+    -- Rows come from a settings change too (not only an event): the threat drift redraw runs again for them.
+    if #entries > 0 and self.events then self.events:Show() end
 end
 
 ------------------------------------------------------------------------------
