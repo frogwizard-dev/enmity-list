@@ -356,7 +356,7 @@ function Lab:Record(window, action, outcome, damage)
     self.session.samples = self.session.samples + 1
     if db.verbose then
         local scale = self:Scale()
-        print(string.format("|cffe08080EnmityList lab|r: %s%s %s%d threat (%s%s%s)",
+        FrogLib.Util.Say(string.format("|cffe08080EnmityList lab|r: %s%s %s%d threat (%s%s%s)",
             meta.name, meta.rank and (" (" .. meta.rank .. ")") or "",
             threat >= 0 and "+" or "", math.floor(threat / scale + 0.5), outcome,
             damage and (", " .. damage .. " damage") or "",

@@ -433,7 +433,7 @@ end)
 local function Test()
     local unit = "target"
     if not UnitExists(unit) then
-        print("|cffe08080EnmityList|r: target an enemy you're fighting first.")
+        FrogLib.Util.Say("|cffe08080EnmityList|r: target an enemy you're fighting first.")
         return
     end
     local function Describe(value)
@@ -442,19 +442,19 @@ local function Test()
         return tostring(value)
     end
     local _, status, percent, rawPercent, value = UnitDetailedThreatSituation("player", unit)
-    print(string.format("|cffe08080EnmityList|r: in combat: %s. You: status %s, %% %s, raw %% %s, threat %s.",
+    FrogLib.Util.Say(string.format("|cffe08080EnmityList|r: in combat: %s. You: status %s, %% %s, raw %% %s, threat %s.",
         tostring(InCombatLockdown()), Describe(status), Describe(percent), Describe(rawPercent), Describe(value)))
     for _, other in ipairs({ "pet", "party1", "party2", "party3", "party4" }) do
         if UnitExists(other) then
             local _, _, theirPercent, _, theirValue = UnitDetailedThreatSituation(other, unit)
-            print(string.format("  %s: %% %s, threat %s", other, Describe(theirPercent), Describe(theirValue)))
+            FrogLib.Util.Say(string.format("  %s: %% %s, threat %s", other, Describe(theirPercent), Describe(theirValue)))
         end
     end
     local plate = C_NamePlate and C_NamePlate.GetNamePlateForUnit and C_NamePlate.GetNamePlateForUnit(unit)
     if plate then
-        print("  Its nameplate: " .. (plate:IsForbidden() and "forbidden" or "open to addons") .. ".")
+        FrogLib.Util.Say("  Its nameplate: " .. (plate:IsForbidden() and "forbidden" or "open to addons") .. ".")
     else
-        print("  Its nameplate: none showing (V shows enemy nameplates).")
+        FrogLib.Util.Say("  Its nameplate: none showing (V shows enemy nameplates).")
     end
 end
 

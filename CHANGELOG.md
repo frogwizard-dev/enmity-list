@@ -1,5 +1,9 @@
 # EnmityList
 
+## 0.4.4
+
+- The threat lab's lines and /enmity's replies wait for the end of combat when they come during it (a line printed in combat taints the chat history, as EllesmereUI found). Shared code: FrogLib 1.13.0.
+
 ## 0.4.3
 
 - Your target's threat reads in numbers again (it's read as your target, not through its plate), and the lab keeps its baseline on your target rather than dropping it.

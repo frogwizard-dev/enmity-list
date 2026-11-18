@@ -230,7 +230,7 @@ StaticPopupDialogs["ENMITYLIST_LAB_RESET"] = {
         ns.Lab:Reset()
         LabUI.selected = nil
         LabUI:Refresh()
-        print("|cffe08080EnmityList|r: threat lab data reset.")
+        FrogLib.Util.Say("|cffe08080EnmityList|r: threat lab data reset.")
     end,
     timeout = 0,
     whileDead = true,
@@ -738,7 +738,7 @@ function LabUI.Command(args)
         LabUI:AskReset()
     elseif command == "verbose" then
         Lab.db.verbose = not Lab.db.verbose
-        print("|cffe08080EnmityList|r: threat lab chat lines " .. (Lab.db.verbose and "on." or "off."))
+        FrogLib.Util.Say("|cffe08080EnmityList|r: threat lab chat lines " .. (Lab.db.verbose and "on." or "off."))
         LabUI:Refresh()
     elseif command == "units" then
         local units = (rest or ""):lower()
@@ -748,10 +748,10 @@ function LabUI.Command(args)
             Lab.db.units = "auto"
         end
         local scale, how = Lab:Scale()
-        print(string.format("|cffe08080EnmityList|r: threat lab shows the game's raw threat / %d (%s).", scale, how))
+        FrogLib.Util.Say(string.format("|cffe08080EnmityList|r: threat lab shows the game's raw threat / %d (%s).", scale, how))
         LabUI:Refresh()
     else
-        print("|cffe08080EnmityList|r: /enmity lab (the window), /enmity lab reset, /enmity lab verbose, "
+        FrogLib.Util.Say("|cffe08080EnmityList|r: /enmity lab (the window), /enmity lab reset, /enmity lab verbose, "
             .. "/enmity lab units auto, 1 or 100")
     end
 end
